@@ -14,6 +14,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get("/", (req, res) => {
+  res.send("Welcome to the Mini Mart API");
+});
+
 // API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);

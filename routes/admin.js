@@ -182,12 +182,15 @@ router.get("/dashboard", adminAuth, async (req, res) => {
     const totalProducts = await Product.countDocuments();
     const totalUsers = await User.countDocuments();
     const totalOrders = await Order.countDocuments();
-    const pendingOrders = await Order.countDocuments({ status: "pending" });
+    // Pending orders: use correct field name
+    const pendingOrders = await Order.countDocuments({
+      order_status: "pending",
+    });
 
-    // Calculate total revenue
-    const orders = await Order.find({ status: { $ne: "cancelled" } });
-    const totalRevenue = orders.reduce((sum, order) => {
-      const orderAmount = order.totalAmount || order.total || 0;
+    // Calculate total revenue: only delivered orders, use total_amount
+    const deliveredOrders = await Order.find({ order_status: "delivered" });
+    const totalRevenue = deliveredOrders.reduce((sum, order) => {
+      const orderAmount = order.total_amount || 0;
       return sum + orderAmount;
     }, 0);
 
@@ -302,13 +305,25 @@ router.get("/orders", adminAuth, async (req, res) => {
 // Update Order Status
 router.put("/orders/:id", adminAuth, async (req, res) => {
   try {
-    const { status } = req.body;
+    // Accept both 'order_status' and fallback to 'status' for backward compatibility
+    const { order_status, status } = req.body;
+    const update = {};
+    // If updating to delivered, also set payment_status to completed
+    if (order_status) {
+      update.order_status = order_status;
+      if (order_status === "delivered") {
+        update.payment_status = "completed";
+      }
+    } else if (status) {
+      update.order_status = status;
+      if (status === "delivered") {
+        update.payment_status = "completed";
+      }
+    }
 
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true }
-    )
+    const order = await Order.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+    })
       .populate("user", "name email")
       .populate("items.product", "name price");
 
@@ -338,6 +353,11 @@ router.get("/categories", adminAuth, async (req, res) => {
         });
         return {
           ...category.toObject(),
+          // category.toObject() converts the Mongoose category document into a plain JavaScript object.
+// The ... (spread operator) copies all properties from that object into a new object.
+// Then, productCount is added as a new property to that object.
+// Result:
+// You get a new object that contains all the original category fields (like _id, name, description, etc.) plus a new field called productCount (the number of products in that category).
           productCount,
         };
       })
@@ -359,6 +379,10 @@ router.post("/categories", adminAuth, async (req, res) => {
     const existingCategory = await Category.findOne({
       name: { $regex: new RegExp(`^${name}$`, "i") },
     });
+
+//     Searches the Category collection for a document whose name matches the new category name (name from the request body).
+// The $regex with ^${name}$ ensures an exact match (not just partial), and the "i" flag makes it case-insensitive.
+// For example, if you try to add "Electronics" and "electronics" already exists, it will be considered a duplicate.
     if (existingCategory) {
       return res.status(400).json({ message: "Category already exists" });
     }
@@ -393,7 +417,14 @@ router.put("/categories/:id", adminAuth, async (req, res) => {
     if (name) {
       const existingCategory = await Category.findOne({
         name: { $regex: new RegExp(`^${name}$`, "i") },
+        // $regex: Tells MongoDB to match the name field using a regular expression.
+// new RegExp(^${name}$, "i"):
+// ^ and $ mean the match must be exact (from start to end).
+// ${name} is the value you are searching for.
+// "i" makes the search case-insensitive (so "Electronics" and "electronics" are considered the same).
         _id: { $ne: categoryId },
+//         $ne stands for "not equal".
+// It is used to filter out documents where a field does not match a specific value.
       });
       if (existingCategory) {
         return res
